@@ -1,0 +1,2 @@
+User-agent: *
+Disallow: /korean-drama-100/

@@ -1,0 +1,12 @@
+'use strict';
+self.window={};importScripts('./data.js');
+const D=self.window.BOOK_DATA,CACHE='korean-drama-100-'+D.version;
+const SHELL=['./','./index.html','./style.css','./app.js','./data.js','./manifest.webmanifest','./icon.svg'];
+const ASSETS=[...Object.values(D.audio).map(a=>'./'+a.src),...Object.values(D.culture).map(c=>'./'+c.src)];
+let saving;
+async function saveAssets(){if(saving)return saving;saving=(async()=>{const cache=await caches.open(CACHE);let failed=0;for(let i=0;i<ASSETS.length;i+=8){const results=await Promise.allSettled(ASSETS.slice(i,i+8).map(async src=>{if(!await cache.match(src))await cache.add(src);}));failed+=results.filter(r=>r.status==='rejected').length;}for(const c of await self.clients.matchAll())c.postMessage({type:'SAVE_RESULT',failed});})().finally(()=>saving=null);return saving;}
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
+self.addEventListener('activate',e=>e.waitUntil((async()=>{await self.clients.claim();for(const name of await caches.keys())if(name.startsWith('korean-drama-100-')&&name!==CACHE)await caches.delete(name);await saveAssets();})()));
+self.addEventListener('message',e=>{if(e.data?.type==='SAVE_ASSETS')e.waitUntil(saveAssets());});
+async function fromCache(request){const cache=await caches.open(CACHE),response=await cache.match(request.url);if(!response)return Response.error();const range=request.headers.get('range');if(!range)return response;const bytes=await response.arrayBuffer(),m=/^bytes=(\d*)-(\d*)$/.exec(range);if(!m)return response;const start=m[1]?+m[1]:Math.max(0,bytes.byteLength-+m[2]);const end=m[1]&&m[2]?Math.min(+m[2],bytes.byteLength-1):bytes.byteLength-1;if(start>end||start>=bytes.byteLength)return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+bytes.byteLength}});return new Response(bytes.slice(start,end+1),{status:206,headers:{'Content-Type':response.headers.get('Content-Type')||'audio/mpeg','Content-Range':`bytes ${start}-${end}/${bytes.byteLength}`,'Content-Length':String(end-start+1),'Accept-Ranges':'bytes'}});}
+self.addEventListener('fetch',e=>{const url=new URL(e.request.url);if(e.request.method!=='GET'||url.origin!==location.origin)return;e.respondWith(fetch(e.request).then(response=>{if(response.ok&&response.status===200&&!e.request.headers.has('range')){const copy=response.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(e.request,copy)));}return response;}).catch(()=>fromCache(e.request)));});
